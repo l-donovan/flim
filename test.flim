@@ -1,0 +1,27 @@
+inventory {
+	use_root true
+	items [
+		item {
+			host "100.100.100.100"
+		}
+		item {
+			host "100.100.100.101"
+			timeout 60
+		}
+		item {
+			host from "hostname"
+			name "A"
+			port from "base_port"
+		}
+		item {
+			host from "hostname"
+			name "B"
+			port add [from "base_port" 1]
+		}
+		item {
+			host from "hostname"
+			name "C"
+			port add [from "base_port" 2]
+		}
+	]
+}

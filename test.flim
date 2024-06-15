@@ -1,3 +1,12 @@
+item #some_item {
+	host "0.0.0.0"
+}
+
+#default_creds {
+	username "testuser"
+	auth_method "key"
+}
+
 inventory {
 	use_root true
 	items [
@@ -9,19 +18,25 @@ inventory {
 			timeout 60
 		}
 		item {
-			host from "hostname"
 			name "A"
+			host from "hostname"
 			port from "base_port"
 		}
 		item {
-			host from "hostname"
 			name "B"
+			host from "hostname"
 			port add [from "base_port" 1]
 		}
 		item {
-			host from "hostname"
 			name "C"
+			host from "hostname"
 			port add [from "base_port" 2]
 		}
+		&some_item
 	]
+	credentials {
+		*&default_creds
+		username "realuser"
+	}
 }
+

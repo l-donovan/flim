@@ -65,11 +65,24 @@ func main() {
 		},
 	}
 
-	output, err := expr.Evaluate(handlers)
+	fmt.Println(expr.ToString())
+
+	tags := expr.GetTags()
+	newExpr, err := expr.ReplaceReferences(tags)
 
 	if err != nil {
 		panic(err)
 	}
 
+	fmt.Println()
+	fmt.Println(newExpr.ToString())
+
+	output, err := newExpr.Evaluate(handlers)
+
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println()
 	fmt.Println(output)
 }

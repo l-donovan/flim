@@ -20,25 +20,47 @@ func (p Parser) peekToken() LexerToken {
 	return p.tokens[0]
 }
 
-func (p *Parser) parseMapExpression() (Expression, error) {
-	pairs := []PairExpression{}
+func (p *Parser) parseMapPairExpression() (ExpressionMeta, error) {
+	if p.peekToken().IsOfType("Star") {
+		expr, err := p.parseTaggedExpression()
 
-	for !p.peekToken().IsOfType("RightCurlyBrace") {
-		leftToken := p.popToken()
-
-		if !leftToken.IsOfType("Keyword") {
-			return nil, fmt.Errorf("NO GOOD")
+		if err != nil {
+			return undefinedExpressionMeta, err
 		}
 
-		left := leftToken.Contents
+		return expr, nil
+	}
 
-		right, err := p.parseExpression()
+	leftToken := p.popToken()
+
+	if !leftToken.IsOfType("Keyword") {
+		return undefinedExpressionMeta, fmt.Errorf("map pair cannot start with token of type %s", leftToken.Name)
+	}
+
+	left := leftToken.Contents
+
+	right, err := p.parseTaggedExpression()
+
+	if err != nil {
+		return undefinedExpressionMeta, err
+	}
+
+	expr := PairExpression{key: left, val: right}
+	pair := ExpressionMeta{expr, false, ""}
+
+	return pair, nil
+}
+
+func (p *Parser) parseMapExpression() (Expression, error) {
+	pairs := []ExpressionMeta{}
+
+	for !p.peekToken().IsOfType("RightCurlyBrace") {
+		pair, err := p.parseMapPairExpression()
 
 		if err != nil {
 			return nil, err
 		}
 
-		pair := PairExpression{key: left, val: right}
 		pairs = append(pairs, pair)
 	}
 
@@ -49,10 +71,10 @@ func (p *Parser) parseMapExpression() (Expression, error) {
 }
 
 func (p *Parser) parseListExpression() (Expression, error) {
-	listItems := []Expression{}
+	listItems := []ExpressionMeta{}
 
 	for !p.peekToken().IsOfType("RightSquareBracket") {
-		listItem, err := p.parseExpression()
+		listItem, err := p.parseTaggedExpression()
 
 		if err != nil {
 			return nil, err
@@ -67,67 +89,145 @@ func (p *Parser) parseListExpression() (Expression, error) {
 	return ListExpression{listItems}, nil
 }
 
-func (p *Parser) parseExpression() (Expression, error) {
+func (p *Parser) parseExpression() (ExpressionMeta, error) {
 	token := p.popToken()
+	shouldExpand := false
+
+	if token.IsOfType("Star") {
+		token = p.popToken()
+		shouldExpand = true
+
+		if !token.IsOfType("Keyword", "LeftSquareBracket", "LeftCurlyBrace", "Ampersand") {
+			return undefinedExpressionMeta, fmt.Errorf("token of type %s cannot be expanded", token.Name)
+		}
+	}
 
 	if token.IsOfType("Boolean") {
 		val := token.Contents == "true"
-		return BooleanLiteralExpression{val}, nil
+		expr := BooleanLiteralExpression{val}
+		return ExpressionMeta{expr, shouldExpand, ""}, nil
 	}
 
 	if token.IsOfType("String") {
 		val := token.Contents[1 : len(token.Contents)-1]
-		return StringLiteralExpression{val}, nil
+		expr := StringLiteralExpression{val}
+		return ExpressionMeta{expr, shouldExpand, ""}, nil
 	}
 
 	if token.IsOfType("Float") {
 		val, err := strconv.ParseFloat(token.Contents, 64)
 
 		if err != nil {
-			return nil, err
+			return undefinedExpressionMeta, err
 		}
 
-		return FloatLiteralExpression{val}, nil
+		expr := FloatLiteralExpression{val}
+		return ExpressionMeta{expr, shouldExpand, ""}, nil
 	}
 
 	if token.IsOfType("Integer") {
 		val, err := strconv.ParseInt(token.Contents, 10, 64)
 
 		if err != nil {
-			return nil, err
+			return undefinedExpressionMeta, err
 		}
 
-		return IntegerLiteralExpression{val}, nil
+		expr := IntegerLiteralExpression{val}
+		return ExpressionMeta{expr, shouldExpand, ""}, nil
 	}
 
 	if token.IsOfType("Null") {
-		return NullLiteralExpression{}, nil
+		expr := NullLiteralExpression{}
+		return ExpressionMeta{expr, shouldExpand, ""}, nil
 	}
 
 	if token.IsOfType("LeftCurlyBrace") {
-		return p.parseMapExpression()
+		expr, err := p.parseMapExpression()
+		return ExpressionMeta{expr, shouldExpand, ""}, err
 	}
 
 	if token.IsOfType("LeftSquareBracket") {
-		return p.parseListExpression()
+		expr, err := p.parseListExpression()
+		return ExpressionMeta{expr, shouldExpand, ""}, err
 	}
 
 	if token.IsOfType("Keyword") {
-		expr, err := p.parseExpression()
+		baseExpr, err := p.parseTaggedExpression()
+
+		if err != nil {
+			return undefinedExpressionMeta, err
+		}
+
+		expr := NamedExpression{name: token.Contents, expr: baseExpr}
+		return ExpressionMeta{expr, shouldExpand, ""}, nil
+	}
+
+	if token.IsOfType("Ampersand") {
+		nameToken := p.popToken()
+
+		if !nameToken.IsOfType("Keyword") {
+			return undefinedExpressionMeta, fmt.Errorf("tag references must be keywords")
+		}
+
+		expr := ReferenceExpression{nameToken.Contents}
+		return ExpressionMeta{expr, shouldExpand, ""}, nil
+	}
+
+	return undefinedExpressionMeta, fmt.Errorf("unknown token type %s", token.Name)
+}
+
+func (p *Parser) parseTaggedExpression() (ExpressionMeta, error) {
+	tagName := ""
+
+	if p.peekToken().IsOfType("Pound") {
+		p.popToken()
+
+		token := p.popToken()
+
+		if !token.IsOfType("Keyword") {
+			return undefinedExpressionMeta, fmt.Errorf("expected keyword")
+		}
+
+		tagName = token.Contents
+	}
+
+	exprMeta, err := p.parseExpression()
+
+	if err != nil {
+		return undefinedExpressionMeta, err
+	}
+
+	exprMeta.Tag = tagName
+
+	return exprMeta, nil
+}
+
+func (p *Parser) parseFileExpression() (Expression, error) {
+	expressions := []ExpressionMeta{}
+
+	for len(p.tokens) > 0 {
+		expr, err := p.parseTaggedExpression()
 
 		if err != nil {
 			return nil, err
 		}
 
-		return NamedExpression{name: token.Contents, expr: expr}, nil
+		expressions = append(expressions, expr)
 	}
 
-	return nil, fmt.Errorf("unknown token type %s", token.Name)
+	return FileExpression{expressions}, nil
 }
 
-func (p *Parser) parse(tokens []LexerToken) (Expression, error) {
+func (p *Parser) Parse(tokens []LexerToken) (Expression, error) {
 	p.tokens = tokens
-	return p.parseExpression()
+
+	fileExpr, err := p.parseFileExpression()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return fileExpr, nil
 }
 
 func ParseFile(filename string) (Expression, error) {
@@ -144,7 +244,7 @@ func ParseFile(filename string) (Expression, error) {
 	}
 
 	parser := Parser{}
-	expr, err := parser.parse(tokens)
+	expr, err := parser.Parse(tokens)
 
 	if err != nil {
 		return nil, err

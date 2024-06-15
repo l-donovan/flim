@@ -9,8 +9,76 @@ type HandlerFunc func(data interface{}) (interface{}, error)
 
 type Expression interface {
 	ToString() string
+	GetTags() map[string]ExpressionMeta
+	ReplaceReferences(map[string]ExpressionMeta) (Expression, error)
 	Evaluate(map[string]HandlerFunc) (interface{}, error)
 }
+
+type ExpressionMeta struct {
+	Expr         Expression
+	ShouldExpand bool
+	Tag          string
+}
+
+func (e ExpressionMeta) ToString() string {
+	str := e.Expr.ToString()
+
+	if e.ShouldExpand {
+		str = "*" + str
+	}
+
+	if len(e.Tag) > 0 {
+		str = "#" + e.Tag + " " + str
+	}
+
+	return str
+}
+
+func (e ExpressionMeta) GetTags() map[string]ExpressionMeta {
+	tags := map[string]ExpressionMeta{}
+
+	if e.Tag != "" {
+		tags[e.Tag] = e
+	}
+
+	childTags := e.Expr.GetTags()
+
+	for key, val := range childTags {
+		if key != "" {
+			tags[key] = val
+		}
+	}
+
+	return tags
+}
+
+func (e ExpressionMeta) ReplaceReferences(tags map[string]ExpressionMeta) (ExpressionMeta, error) {
+	// TODO This implementation seems questionable
+
+	if refExpr, ok := e.Expr.(ReferenceExpression); ok {
+		if replacement, exists := tags[refExpr.name]; exists {
+			e.Expr = replacement.Expr
+		} else {
+			return undefinedExpressionMeta, fmt.Errorf("could not find tag `%s'", refExpr.name)
+		}
+	}
+
+	newExpr, err := e.Expr.ReplaceReferences(tags)
+
+	if err != nil {
+		return undefinedExpressionMeta, err
+	}
+
+	e.Expr = newExpr
+
+	return e, nil
+}
+
+func (e ExpressionMeta) Evaluate(handlers map[string]HandlerFunc) (interface{}, error) {
+	return e.Expr.Evaluate(handlers)
+}
+
+var undefinedExpressionMeta = ExpressionMeta{}
 
 type IntegerLiteralExpression struct {
 	val int64
@@ -18,6 +86,14 @@ type IntegerLiteralExpression struct {
 
 func (e IntegerLiteralExpression) ToString() string {
 	return fmt.Sprintf("IntegerLiteralExpression<%d>", e.val)
+}
+
+func (e IntegerLiteralExpression) GetTags() map[string]ExpressionMeta {
+	return map[string]ExpressionMeta{}
+}
+
+func (e IntegerLiteralExpression) ReplaceReferences(tags map[string]ExpressionMeta) (Expression, error) {
+	return e, nil
 }
 
 func (e IntegerLiteralExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, error) {
@@ -32,6 +108,14 @@ func (e FloatLiteralExpression) ToString() string {
 	return fmt.Sprintf("FloatLiteralExpression<%f>", e.val)
 }
 
+func (e FloatLiteralExpression) GetTags() map[string]ExpressionMeta {
+	return map[string]ExpressionMeta{}
+}
+
+func (e FloatLiteralExpression) ReplaceReferences(tags map[string]ExpressionMeta) (Expression, error) {
+	return e, nil
+}
+
 func (e FloatLiteralExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, error) {
 	return e.val, nil
 }
@@ -42,6 +126,14 @@ type BooleanLiteralExpression struct {
 
 func (e BooleanLiteralExpression) ToString() string {
 	return fmt.Sprintf("BooleanLiteralExpression<%t>", e.val)
+}
+
+func (e BooleanLiteralExpression) ReplaceReferences(tags map[string]ExpressionMeta) (Expression, error) {
+	return e, nil
+}
+
+func (e BooleanLiteralExpression) GetTags() map[string]ExpressionMeta {
+	return map[string]ExpressionMeta{}
 }
 
 func (e BooleanLiteralExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, error) {
@@ -56,6 +148,14 @@ func (e StringLiteralExpression) ToString() string {
 	return fmt.Sprintf("StringLiteralExpression<%s>", e.val)
 }
 
+func (e StringLiteralExpression) ReplaceReferences(tags map[string]ExpressionMeta) (Expression, error) {
+	return e, nil
+}
+
+func (e StringLiteralExpression) GetTags() map[string]ExpressionMeta {
+	return map[string]ExpressionMeta{}
+}
+
 func (e StringLiteralExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, error) {
 	return e.val, nil
 }
@@ -67,12 +167,20 @@ func (e NullLiteralExpression) ToString() string {
 	return "NullLiteralExpression<>"
 }
 
+func (e NullLiteralExpression) ReplaceReferences(tags map[string]ExpressionMeta) (Expression, error) {
+	return e, nil
+}
+
+func (e NullLiteralExpression) GetTags() map[string]ExpressionMeta {
+	return map[string]ExpressionMeta{}
+}
+
 func (e NullLiteralExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, error) {
 	return nil, nil
 }
 
 type ListExpression struct {
-	listItems []Expression
+	listItems []ExpressionMeta
 }
 
 func (e ListExpression) ToString() string {
@@ -85,6 +193,34 @@ func (e ListExpression) ToString() string {
 	return fmt.Sprintf("ListExpression<%s>", strings.Join(listItemStrings, ", "))
 }
 
+func (e ListExpression) GetTags() map[string]ExpressionMeta {
+	tags := map[string]ExpressionMeta{}
+
+	for _, listItem := range e.listItems {
+		childTags := listItem.GetTags()
+
+		for key, val := range childTags {
+			tags[key] = val
+		}
+	}
+
+	return tags
+}
+
+func (e ListExpression) ReplaceReferences(tags map[string]ExpressionMeta) (Expression, error) {
+	for i, listItem := range e.listItems {
+		newExpr, err := listItem.ReplaceReferences(tags)
+
+		if err != nil {
+			return nil, err
+		}
+
+		e.listItems[i] = newExpr
+	}
+
+	return e, nil
+}
+
 func (e ListExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, error) {
 	listItemResults := []interface{}{}
 
@@ -95,7 +231,19 @@ func (e ListExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, 
 			return nil, err
 		}
 
-		listItemResults = append(listItemResults, listItemResult)
+		if listItem.ShouldExpand {
+			listItemExpanded, ok := listItemResult.([]interface{})
+
+			if !ok {
+				return nil, fmt.Errorf("could not expand list item")
+			}
+
+			for _, listItemSingleResult := range listItemExpanded {
+				listItemResults = append(listItemResults, listItemSingleResult)
+			}
+		} else {
+			listItemResults = append(listItemResults, listItemResult)
+		}
 	}
 
 	return listItemResults, nil
@@ -108,14 +256,30 @@ type Pair struct {
 
 type PairExpression struct {
 	key string
-	val Expression
+	val ExpressionMeta
 }
 
-func (e PairExpression) toString() string {
+func (e PairExpression) ToString() string {
 	return fmt.Sprintf("PairExpression<%s: %s>", e.key, e.val.ToString())
 }
 
-func (e PairExpression) evaluate(handlers map[string]HandlerFunc) (interface{}, error) {
+func (e PairExpression) GetTags() map[string]ExpressionMeta {
+	return e.val.GetTags()
+}
+
+func (e PairExpression) ReplaceReferences(tags map[string]ExpressionMeta) (Expression, error) {
+	newExpr, err := e.val.ReplaceReferences(tags)
+
+	if err != nil {
+		return nil, err
+	}
+
+	e.val = newExpr
+
+	return e, nil
+}
+
+func (e PairExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, error) {
 	result, err := e.val.Evaluate(handlers)
 
 	if err != nil {
@@ -126,31 +290,71 @@ func (e PairExpression) evaluate(handlers map[string]HandlerFunc) (interface{}, 
 }
 
 type MapExpression struct {
-	pairs []PairExpression
+	pairs []ExpressionMeta
 }
 
 func (e MapExpression) ToString() string {
 	pairStrings := []string{}
 
 	for _, pair := range e.pairs {
-		pairStrings = append(pairStrings, pair.toString())
+		pairStrings = append(pairStrings, pair.ToString())
 	}
 
 	return fmt.Sprintf("MapExpression<%s>", strings.Join(pairStrings, ", "))
+}
+
+func (e MapExpression) GetTags() map[string]ExpressionMeta {
+	tags := map[string]ExpressionMeta{}
+
+	for _, pairExpr := range e.pairs {
+		pairTags := pairExpr.GetTags()
+
+		for key, val := range pairTags {
+			tags[key] = val
+		}
+	}
+
+	return tags
+}
+
+func (e MapExpression) ReplaceReferences(tags map[string]ExpressionMeta) (Expression, error) {
+	for i, pairExpr := range e.pairs {
+		newExpr, err := pairExpr.ReplaceReferences(tags)
+
+		if err != nil {
+			return nil, err
+		}
+
+		e.pairs[i] = newExpr
+	}
+
+	return e, nil
 }
 
 func (e MapExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, error) {
 	pairResults := map[string]interface{}{}
 
 	for _, pairExpr := range e.pairs {
-		pairResult, err := pairExpr.evaluate(handlers)
+		pairResult, err := pairExpr.Evaluate(handlers)
 
 		if err != nil {
 			return nil, err
 		}
 
-		pair := pairResult.(Pair)
-		pairResults[pair.Key] = pair.Val
+		if pairExpr.ShouldExpand {
+			pairExprExpanded, ok := pairResult.(map[string]interface{})
+
+			if !ok {
+				return nil, fmt.Errorf("could not expand map pair")
+			}
+
+			for key, val := range pairExprExpanded {
+				pairResults[key] = val
+			}
+		} else {
+			pair := pairResult.(Pair)
+			pairResults[pair.Key] = pair.Val
+		}
 	}
 
 	return pairResults, nil
@@ -158,11 +362,27 @@ func (e MapExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, e
 
 type NamedExpression struct {
 	name string
-	expr Expression
+	expr ExpressionMeta
 }
 
 func (e NamedExpression) ToString() string {
 	return fmt.Sprintf("NamedExpression<%s, %s>", e.name, e.expr.ToString())
+}
+
+func (e NamedExpression) GetTags() map[string]ExpressionMeta {
+	return e.expr.GetTags()
+}
+
+func (e NamedExpression) ReplaceReferences(tags map[string]ExpressionMeta) (Expression, error) {
+	newExpr, err := e.expr.ReplaceReferences(tags)
+
+	if err != nil {
+		return nil, err
+	}
+
+	e.expr = newExpr
+
+	return e, nil
 }
 
 func (e NamedExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, error) {
@@ -185,4 +405,94 @@ func (e NamedExpression) Evaluate(handlers map[string]HandlerFunc) (interface{},
 	}
 
 	return handlerResult, nil
+}
+
+type ReferenceExpression struct {
+	name string
+}
+
+func (e ReferenceExpression) ToString() string {
+	return fmt.Sprintf("ReferenceExpression<%s>", e.name)
+}
+
+func (e ReferenceExpression) GetTags() map[string]ExpressionMeta {
+	return map[string]ExpressionMeta{}
+}
+
+func (e ReferenceExpression) ReplaceReferences(tags map[string]ExpressionMeta) (Expression, error) {
+	return e, nil
+}
+
+func (e ReferenceExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, error) {
+	return nil, fmt.Errorf("attempted to Evaluate a ReferenceExpression (hint: call ReplaceReferences first)")
+}
+
+type FileExpression struct {
+	expressions []ExpressionMeta
+}
+
+func (e FileExpression) ToString() string {
+	expressionStrings := []string{}
+
+	for _, expr := range e.expressions {
+		expressionStrings = append(expressionStrings, expr.ToString())
+	}
+
+	return fmt.Sprintf("FileExpression<%s>", strings.Join(expressionStrings, ", "))
+}
+
+func (e FileExpression) GetTags() map[string]ExpressionMeta {
+	tags := map[string]ExpressionMeta{}
+
+	for _, expr := range e.expressions {
+		childTags := expr.GetTags()
+
+		for key, val := range childTags {
+			tags[key] = val
+		}
+	}
+
+	return tags
+}
+
+func (e FileExpression) ReplaceReferences(tags map[string]ExpressionMeta) (Expression, error) {
+	for i, expr := range e.expressions {
+		newExpr, err := expr.ReplaceReferences(tags)
+
+		if err != nil {
+			return nil, err
+		}
+
+		e.expressions[i] = newExpr
+	}
+
+	return e, nil
+}
+
+func (e FileExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, error) {
+	lastListItemResult := interface{}(nil)
+
+	for _, expr := range e.expressions {
+		listItemResult, err := expr.Evaluate(handlers)
+
+		if err != nil {
+			return nil, err
+		}
+
+		if expr.ShouldExpand {
+			listItemExpanded, ok := listItemResult.([]interface{})
+
+			if !ok {
+				return nil, fmt.Errorf("could not expand list item")
+			}
+
+			for _, listItemSingleResult := range listItemExpanded {
+				lastListItemResult = listItemSingleResult
+			}
+		} else {
+			lastListItemResult = listItemResult
+		}
+	}
+
+	return lastListItemResult, nil
 }

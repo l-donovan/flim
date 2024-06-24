@@ -24,7 +24,7 @@ func main() {
 
 			for _, key := range requiredKeys {
 				if _, ok := data.(map[string]interface{})[key]; !ok {
-					return nil, fmt.Errorf("inventory missing required key `items'")
+					return nil, fmt.Errorf("inventory missing required key `%s'", key)
 				}
 			}
 
@@ -67,17 +67,7 @@ func main() {
 
 	fmt.Println(expr.ToString())
 
-	tags := expr.GetTags()
-	newExpr, err := expr.ReplaceReferences(tags)
-
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Println()
-	fmt.Println(newExpr.ToString())
-
-	output, err := newExpr.Evaluate(handlers)
+	output, err := expr.Evaluate(handlers)
 
 	if err != nil {
 		panic(err)

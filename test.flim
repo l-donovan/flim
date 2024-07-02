@@ -1,4 +1,4 @@
-item #some_item {
+#some_item item {
 	host "0.0.0.0"
 }
 

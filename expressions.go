@@ -5,6 +5,42 @@ import (
 	"strings"
 )
 
+type SerializerConfig struct {
+	useTabs    bool
+	indentSize int
+	minify     bool
+}
+
+func (c SerializerConfig) Indent(indentLevel int) string {
+	if c.minify {
+		return ""
+	}
+
+	if c.useTabs {
+		return strings.Repeat("\t", c.indentSize*indentLevel)
+	}
+
+	return strings.Repeat(" ", c.indentSize*indentLevel)
+}
+
+func (c SerializerConfig) Sep(separator string, alt string) string {
+	if c.minify {
+		return alt
+	}
+
+	return separator
+}
+
+func Serialize(expr Expression, useTabs bool, indentSize int) (string, error) {
+	config := SerializerConfig{useTabs: useTabs, indentSize: indentSize}
+	return expr.Serialize(&config, 0)
+}
+
+func Minify(expr Expression) (string, error) {
+	config := SerializerConfig{minify: true}
+	return expr.Serialize(&config, 0)
+}
+
 type HandlerFunc func(data interface{}) (interface{}, error)
 
 type Expression interface {
@@ -12,6 +48,7 @@ type Expression interface {
 	GetTags() map[string]Expression
 	ReplaceReferences(map[string]Expression) (Expression, error)
 	Evaluate(map[string]HandlerFunc) (interface{}, error)
+	Serialize(config *SerializerConfig, indentLevel int) (string, error)
 }
 
 type ExpandingExpression struct {
@@ -19,7 +56,7 @@ type ExpandingExpression struct {
 }
 
 func (e ExpandingExpression) ToString() string {
-	return fmt.Sprintf("ExpandingExpression<%s>", e.expr.ToString())
+	return fmt.Sprintf("*%s", e.expr.ToString())
 }
 
 func (e ExpandingExpression) GetTags() map[string]Expression {
@@ -42,13 +79,23 @@ func (e ExpandingExpression) Evaluate(handlers map[string]HandlerFunc) (interfac
 	return e.expr.Evaluate(handlers)
 }
 
+func (e ExpandingExpression) Serialize(config *SerializerConfig, indentLevel int) (string, error) {
+	exprStr, err := e.expr.Serialize(config, indentLevel)
+
+	if err != nil {
+		return "", err
+	}
+
+	return "*" + exprStr, nil
+}
+
 type TaggedExpression struct {
 	tag  string
 	expr Expression
 }
 
 func (e TaggedExpression) ToString() string {
-	return fmt.Sprintf("TaggedExpression<#%s, %s>", e.tag, e.expr.ToString())
+	return fmt.Sprintf("#%s %s", e.tag, e.expr.ToString())
 }
 
 func (e TaggedExpression) GetTags() map[string]Expression {
@@ -74,6 +121,16 @@ func (e TaggedExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}
 	return e.expr.Evaluate(handlers)
 }
 
+func (e TaggedExpression) Serialize(config *SerializerConfig, indentLevel int) (string, error) {
+	exprStr, err := e.expr.Serialize(config, indentLevel)
+
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("#%s %s", e.tag, exprStr), nil
+}
+
 type IntegerLiteralExpression struct {
 	val int64
 }
@@ -92,6 +149,10 @@ func (e IntegerLiteralExpression) ReplaceReferences(tags map[string]Expression) 
 
 func (e IntegerLiteralExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, error) {
 	return e.val, nil
+}
+
+func (e IntegerLiteralExpression) Serialize(config *SerializerConfig, indentLevel int) (string, error) {
+	return fmt.Sprintf("%d", e.val), nil
 }
 
 type FloatLiteralExpression struct {
@@ -114,6 +175,10 @@ func (e FloatLiteralExpression) Evaluate(handlers map[string]HandlerFunc) (inter
 	return e.val, nil
 }
 
+func (e FloatLiteralExpression) Serialize(config *SerializerConfig, indentLevel int) (string, error) {
+	return fmt.Sprintf("%f", e.val), nil
+}
+
 type BooleanLiteralExpression struct {
 	val bool
 }
@@ -132,6 +197,10 @@ func (e BooleanLiteralExpression) GetTags() map[string]Expression {
 
 func (e BooleanLiteralExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, error) {
 	return e.val, nil
+}
+
+func (e BooleanLiteralExpression) Serialize(config *SerializerConfig, indentLevel int) (string, error) {
+	return fmt.Sprintf("%t", e.val), nil
 }
 
 type StringLiteralExpression struct {
@@ -154,6 +223,15 @@ func (e StringLiteralExpression) Evaluate(handlers map[string]HandlerFunc) (inte
 	return e.val, nil
 }
 
+func (e StringLiteralExpression) Serialize(config *SerializerConfig, indentLevel int) (string, error) {
+	// TODO Escape more things
+	replacer := strings.NewReplacer(
+		"\n", "\\n",
+	)
+	escapedVal := replacer.Replace(e.val)
+	return fmt.Sprintf("\"%s\"", escapedVal), nil
+}
+
 type NullLiteralExpression struct {
 }
 
@@ -171,6 +249,10 @@ func (e NullLiteralExpression) GetTags() map[string]Expression {
 
 func (e NullLiteralExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, error) {
 	return nil, nil
+}
+
+func (e NullLiteralExpression) Serialize(config *SerializerConfig, indentLevel int) (string, error) {
+	return "null", nil
 }
 
 type ListExpression struct {
@@ -241,6 +323,33 @@ func (e ListExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, 
 	return listItemResults, nil
 }
 
+func (e ListExpression) Serialize(config *SerializerConfig, indentLevel int) (string, error) {
+	exprStrs := make([]string, len(e.listItems))
+
+	for i, listItem := range e.listItems {
+		listItemStr, err := listItem.Serialize(config, indentLevel+1)
+
+		if err != nil {
+			return "", err
+		}
+
+		exprStrs[i] = config.Indent(indentLevel) + listItemStr
+	}
+
+	if len(e.listItems) == 0 {
+		return "[]", nil
+	} else {
+		out := fmt.Sprintf(
+			"[%s%s%s%s]",
+			config.Sep("\n", ""),
+			strings.Join(exprStrs, config.Sep("\n", " ")),
+			config.Sep("\n", ""),
+			config.Indent(indentLevel-1),
+		)
+		return out, nil
+	}
+}
+
 type Pair struct {
 	Key string
 	Val interface{}
@@ -279,6 +388,16 @@ func (e PairExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, 
 	}
 
 	return Pair{Key: e.key, Val: result}, nil
+}
+
+func (e PairExpression) Serialize(config *SerializerConfig, indentLevel int) (string, error) {
+	exprStr, err := e.val.Serialize(config, indentLevel)
+
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%s %s", e.key, exprStr), nil
 }
 
 type MapExpression struct {
@@ -352,6 +471,33 @@ func (e MapExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, e
 	return pairResults, nil
 }
 
+func (e MapExpression) Serialize(config *SerializerConfig, indentLevel int) (string, error) {
+	exprStrs := make([]string, len(e.pairs))
+
+	for i, pair := range e.pairs {
+		pairStr, err := pair.Serialize(config, indentLevel+1)
+
+		if err != nil {
+			return "", err
+		}
+
+		exprStrs[i] = config.Indent(indentLevel) + pairStr
+	}
+
+	if len(e.pairs) == 0 {
+		return "{}", nil
+	} else {
+		out := fmt.Sprintf(
+			"{%s%s%s%s}",
+			config.Sep("\n", ""),
+			strings.Join(exprStrs, config.Sep("\n", " ")),
+			config.Sep("\n", ""),
+			config.Indent(indentLevel-1),
+		)
+		return out, nil
+	}
+}
+
 type NamedExpression struct {
 	name string
 	expr Expression
@@ -399,6 +545,16 @@ func (e NamedExpression) Evaluate(handlers map[string]HandlerFunc) (interface{},
 	return handlerResult, nil
 }
 
+func (e NamedExpression) Serialize(config *SerializerConfig, indentLevel int) (string, error) {
+	exprStr, err := e.expr.Serialize(config, indentLevel)
+
+	if err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%s %s", e.name, exprStr), nil
+}
+
 type ReferenceExpression struct {
 	name string
 }
@@ -421,6 +577,10 @@ func (e ReferenceExpression) ReplaceReferences(tags map[string]Expression) (Expr
 
 func (e ReferenceExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, error) {
 	return nil, fmt.Errorf("attempted to Evaluate a ReferenceExpression (hint: call ReplaceReferences first)")
+}
+
+func (e ReferenceExpression) Serialize(config *SerializerConfig, indentLevel int) (string, error) {
+	return fmt.Sprintf("&%s", e.name), nil
 }
 
 type FileExpression struct {
@@ -491,4 +651,20 @@ func (e FileExpression) Evaluate(handlers map[string]HandlerFunc) (interface{}, 
 	}
 
 	return lastListItemResult, nil
+}
+
+func (e FileExpression) Serialize(config *SerializerConfig, indentLevel int) (string, error) {
+	exprStrs := make([]string, len(e.expressions))
+
+	for i, expr := range e.expressions {
+		exprStr, err := expr.Serialize(config, indentLevel+1)
+
+		if err != nil {
+			return "", err
+		}
+
+		exprStrs[i] = config.Indent(indentLevel) + exprStr
+	}
+
+	return strings.Join(exprStrs, config.Sep("\n\n", " ")), nil
 }

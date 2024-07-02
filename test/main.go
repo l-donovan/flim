@@ -75,4 +75,22 @@ func main() {
 
 	fmt.Println()
 	fmt.Println(output)
+
+	serialized, err := flim.Serialize(expr, false, 4)
+
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println()
+	fmt.Println(serialized)
+
+	minified, err := flim.Minify(expr)
+
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println()
+	fmt.Println(minified)
 }

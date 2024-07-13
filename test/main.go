@@ -2,6 +2,7 @@ package main
 
 import (
 	"flim"
+	"flim/common"
 	"fmt"
 )
 
@@ -17,7 +18,7 @@ func main() {
 		"base_port": 8000,
 	}
 
-	handlers := map[string]flim.HandlerFunc{
+	handlers := map[string]common.HandlerFunc{
 		// We can use a handler to enforce required keys
 		"inventory": func(data interface{}) (interface{}, error) {
 			requiredKeys := []string{"items"}
@@ -63,6 +64,12 @@ func main() {
 
 			return a + int(b), nil
 		},
+
+		"square": func(data interface{}) (interface{}, error) {
+			input := data.(int64)
+
+			return input * input, nil
+		},
 	}
 
 	fmt.Println(expr.ToString())
@@ -76,7 +83,7 @@ func main() {
 	fmt.Println()
 	fmt.Println(output)
 
-	serialized, err := flim.Serialize(expr, false, 4)
+	serialized, err := common.Serialize(expr, false, 4)
 
 	if err != nil {
 		panic(err)
@@ -85,7 +92,7 @@ func main() {
 	fmt.Println()
 	fmt.Println(serialized)
 
-	minified, err := flim.Minify(expr)
+	minified, err := common.Minify(expr)
 
 	if err != nil {
 		panic(err)

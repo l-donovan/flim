@@ -1,6 +1,8 @@
 package flim
 
 import (
+	"flim/common"
+	flimexpr "flim/expressions"
 	"fmt"
 	"os"
 	"strconv"
@@ -16,11 +18,11 @@ func (p *Parser) popToken() LexerToken {
 	return token
 }
 
-func (p Parser) peekToken() LexerToken {
+func (p *Parser) peekToken() LexerToken {
 	return p.tokens[0]
 }
 
-func (p *Parser) parseMapPairExpression() (Expression, error) {
+func (p *Parser) parseMapPairExpression() (common.Expression, error) {
 	if p.peekToken().IsOfType("Star") {
 		expr, err := p.parseExpression()
 
@@ -45,11 +47,11 @@ func (p *Parser) parseMapPairExpression() (Expression, error) {
 		return nil, err
 	}
 
-	return PairExpression{key: left, val: right}, nil
+	return flimexpr.NewPairExpression(left, right)
 }
 
-func (p *Parser) parseMapExpression() (Expression, error) {
-	pairs := []Expression{}
+func (p *Parser) parseMapExpression() (common.Expression, error) {
+	pairs := []common.Expression{}
 
 	for !p.peekToken().IsOfType("RightCurlyBrace") {
 		pair, err := p.parseMapPairExpression()
@@ -64,11 +66,11 @@ func (p *Parser) parseMapExpression() (Expression, error) {
 	// Throw away the right curly brace
 	p.popToken()
 
-	return MapExpression{pairs}, nil
+	return flimexpr.NewMapExpression(pairs)
 }
 
-func (p *Parser) parseListExpression() (Expression, error) {
-	listItems := []Expression{}
+func (p *Parser) parseListExpression() (common.Expression, error) {
+	listItems := []common.Expression{}
 
 	for !p.peekToken().IsOfType("RightSquareBracket") {
 		listItem, err := p.parseExpression()
@@ -83,10 +85,10 @@ func (p *Parser) parseListExpression() (Expression, error) {
 	// Throw away the right square bracket
 	p.popToken()
 
-	return ListExpression{listItems}, nil
+	return flimexpr.NewListExpression(listItems)
 }
 
-func (p *Parser) parseExpression() (Expression, error) {
+func (p *Parser) parseExpression() (common.Expression, error) {
 	token := p.popToken()
 
 	if token.IsOfType("Star") {
@@ -96,7 +98,7 @@ func (p *Parser) parseExpression() (Expression, error) {
 			return nil, err
 		}
 
-		return ExpandingExpression{expr: baseExpr}, nil
+		return flimexpr.NewExpandingExpression(baseExpr)
 	}
 
 	if token.IsOfType("Pound") {
@@ -113,17 +115,34 @@ func (p *Parser) parseExpression() (Expression, error) {
 			return nil, err
 		}
 
-		return TaggedExpression{tag: tagName, expr: baseExpr}, nil
+		return flimexpr.NewTaggedExpression(tagName, baseExpr)
+	}
+
+	if token.IsOfType("AtSign") {
+		token := p.popToken()
+
+		if !token.IsOfType("Keyword") {
+			return nil, fmt.Errorf("expected keyword")
+		}
+
+		transformerName := token.Contents
+		baseExpr, err := p.parseExpression()
+
+		if err != nil {
+			return nil, err
+		}
+
+		return flimexpr.NewMappedTransformerExpression(transformerName, baseExpr)
 	}
 
 	if token.IsOfType("Boolean") {
 		val := token.Contents == "true"
-		return BooleanLiteralExpression{val}, nil
+		return flimexpr.NewBooleanLiteralExpression(val)
 	}
 
 	if token.IsOfType("String") {
 		val := token.Contents[1 : len(token.Contents)-1]
-		return StringLiteralExpression{val}, nil
+		return flimexpr.NewStringLiteralExpression(val)
 	}
 
 	if token.IsOfType("Float") {
@@ -133,7 +152,7 @@ func (p *Parser) parseExpression() (Expression, error) {
 			return nil, err
 		}
 
-		return FloatLiteralExpression{val}, nil
+		return flimexpr.NewFloatLiteralExpression(val)
 	}
 
 	if token.IsOfType("Integer") {
@@ -143,11 +162,11 @@ func (p *Parser) parseExpression() (Expression, error) {
 			return nil, err
 		}
 
-		return IntegerLiteralExpression{val}, nil
+		return flimexpr.NewIntegerLiteralExpression(val)
 	}
 
 	if token.IsOfType("Null") {
-		return NullLiteralExpression{}, nil
+		return flimexpr.NewNullLiteralExpression()
 	}
 
 	if token.IsOfType("LeftCurlyBrace") {
@@ -165,7 +184,7 @@ func (p *Parser) parseExpression() (Expression, error) {
 			return nil, err
 		}
 
-		return NamedExpression{name: token.Contents, expr: baseExpr}, nil
+		return flimexpr.NewTransformerExpression(token.Contents, baseExpr)
 	}
 
 	if token.IsOfType("Ampersand") {
@@ -175,14 +194,14 @@ func (p *Parser) parseExpression() (Expression, error) {
 			return nil, fmt.Errorf("tag references must be keywords")
 		}
 
-		return ReferenceExpression{nameToken.Contents}, nil
+		return flimexpr.NewReferenceExpression(nameToken.Contents)
 	}
 
 	return nil, fmt.Errorf("unknown token type %s", token.Name)
 }
 
-func (p *Parser) parseFileExpression() (Expression, error) {
-	expressions := []Expression{}
+func (p *Parser) parseFileExpression() (common.Expression, error) {
+	expressions := []common.Expression{}
 
 	for len(p.tokens) > 0 {
 		expr, err := p.parseExpression()
@@ -194,10 +213,10 @@ func (p *Parser) parseFileExpression() (Expression, error) {
 		expressions = append(expressions, expr)
 	}
 
-	return FileExpression{expressions}, nil
+	return flimexpr.NewFileExpression(expressions)
 }
 
-func (p *Parser) Parse(tokens []LexerToken) (Expression, error) {
+func (p *Parser) Parse(tokens []LexerToken) (common.Expression, error) {
 	p.tokens = tokens
 
 	fileExpr, err := p.parseFileExpression()
@@ -209,7 +228,7 @@ func (p *Parser) Parse(tokens []LexerToken) (Expression, error) {
 	return fileExpr, nil
 }
 
-func ParseFile(filename string) (Expression, error) {
+func ParseFile(filename string) (common.Expression, error) {
 	fileContents, err := os.ReadFile(filename)
 
 	if err != nil {

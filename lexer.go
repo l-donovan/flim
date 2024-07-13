@@ -78,6 +78,7 @@ func init() {
 		{"RightCurlyBrace", *regexp.MustCompile(`^\}`)},
 		{"LeftSquareBracket", *regexp.MustCompile(`^\[`)},
 		{"RightSquareBracket", *regexp.MustCompile(`^\]`)},
+		{"AtSign", *regexp.MustCompile(`^@`)},
 		{"Whitespace", *regexp.MustCompile(`^\s+`)},
 	}
 }

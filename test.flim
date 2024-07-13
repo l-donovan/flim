@@ -7,27 +7,29 @@
 	auth_method "key"
 }
 
+#my_numbers [2 3 4 -1]
+
 inventory {
 	use_root true
-	items [
-		item {
+	items @item [
+		{
 			host "100.100.100.100"
 		}
-		item {
+		{
 			host "100.100.100.101"
 			timeout 60
 		}
-		item {
+		{
 			name "A"
 			host from "hostname"
 			port from "base_port"
 		}
-		item {
+		{
 			name "B"
 			host from "hostname"
 			port add [from "base_port" 1]
 		}
-		item {
+		{
 			name "C"
 			host from "hostname"
 			port add [from "base_port" 2]
@@ -38,5 +40,6 @@ inventory {
 		*&default_creds
 		username "realuser"
 	}
+	numbers @square &my_numbers
 }
 

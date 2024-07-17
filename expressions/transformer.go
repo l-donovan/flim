@@ -1,7 +1,7 @@
 package expressions
 
 import (
-	"flim/common"
+	"github.com/l-donovan/flim/common"
 	"fmt"
 )
 

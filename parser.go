@@ -1,9 +1,9 @@
 package flim
 
 import (
-	"flim/common"
-	flimexpr "flim/expressions"
 	"fmt"
+	"github.com/l-donovan/flim/common"
+	flimexpr "github.com/l-donovan/flim/expressions"
 	"os"
 	"strconv"
 )
